@@ -1,9 +1,10 @@
 import type { MetaFunction } from "@remix-run/node";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import TopNav from "~/components/TopNav";
 import NotesGrid from "~/components/NotesGrid";
 import NoteModal from "~/components/NoteModal";
-import { getClientNotesService, type Note } from "~/services/notes.client";
+// Import only the Note type here; avoid importing client-only functions at module scope for SSR safety.
+import type { Note } from "~/services/notes.client";
 
 export const meta: MetaFunction = () => {
   return [
@@ -12,8 +13,44 @@ export const meta: MetaFunction = () => {
   ];
 };
 
+// A minimal interface the client service implements
+type NotesService = {
+  list: () => Promise<Note[]>;
+  create: (input: { title: string; content?: string }) => Promise<Note>;
+  update: (input: Partial<{ title: string; content?: string }> & { id: string }) => Promise<Note>;
+  remove: (id: string) => Promise<void>;
+};
+
 export default function Index() {
-  const service = useMemo(() => getClientNotesService(), []);
+  // During SSR we use a no-op service so the page can render; on client we swap it with the real service.
+  const serviceRef = useRef<NotesService>({
+    async list() {
+      return [];
+    },
+    async create(input) {
+      // Simple local echo for SSR fallback; client will replace this before user interaction.
+      return {
+        id: "temp",
+        title: input.title,
+        content: input.content,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as Note;
+    },
+    async update(input) {
+      return {
+        id: input.id,
+        title: (input.title ?? "").toString(),
+        content: (input.content ?? "").toString(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as Note;
+    },
+    async remove() {
+      return;
+    },
+  });
+
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -21,11 +58,40 @@ export default function Index() {
   const [editing, setEditing] = useState<Note | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  // Lazily load the client-only service in the browser
+  useEffect(() => {
+    let cancelled = false;
+    async function init() {
+      if (typeof window === "undefined") return;
+      try {
+        const mod = await import("~/services/notes.client");
+        if (!cancelled && mod && typeof mod.getClientNotesService === "function") {
+          serviceRef.current = mod.getClientNotesService();
+        }
+      } catch (e) {
+        // keep SSR-safe fallback service; show error banner
+        console.error("Failed to load client service", e);
+        setError("Failed to initialize client service; using local mode if available.");
+      } finally {
+        // After ensuring service is set, fetch notes
+        if (!cancelled) {
+          refresh();
+        }
+      }
+    }
+    init();
+    return () => {
+      cancelled = true;
+    };
+    // We intentionally run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
-      const list = await service.list();
+      const list = await serviceRef.current.list();
       setNotes(list);
     } catch {
       setError("Failed to load notes; using local mode if available.");
@@ -33,11 +99,6 @@ export default function Index() {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function handleAdd() {
     setEditing(undefined);
@@ -50,16 +111,16 @@ export default function Index() {
   }
 
   async function handleDelete(id: string) {
-    await service.remove(id);
+    await serviceRef.current.remove(id);
     setNotes((prev) => prev.filter((n) => n.id !== id));
   }
 
   async function handleSubmit(data: { id?: string; title: string; content?: string }) {
     if (data.id) {
-      const updated = await service.update({ id: data.id, title: data.title, content: data.content });
+      const updated = await serviceRef.current.update({ id: data.id, title: data.title, content: data.content });
       setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
     } else {
-      const created = await service.create({ title: data.title, content: data.content });
+      const created = await serviceRef.current.create({ title: data.title, content: data.content });
       setNotes((prev) => [created, ...prev]);
     }
     setModalOpen(false);
