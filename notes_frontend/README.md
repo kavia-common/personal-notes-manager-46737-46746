@@ -4,11 +4,20 @@
 
 ## Development
 
-Run the dev server:
+Run the dev server (Vite) on port 3000:
 
-```shellscript
+```shell
+npm install
 npm run dev
 ```
+
+The app listens on `http://localhost:3000` (hosted on `0.0.0.0` for container environments).
+
+Environment variables are optional for local-only mode. If you don't set any backend URL, the app will store notes in `localStorage`. If you have a backend, you can set one of:
+- `VITE_API_BASE` (preferred)
+- `VITE_BACKEND_URL`
+
+If unset, the app will gracefully fall back to local mode.
 
 ## Deployment
 
@@ -24,13 +33,7 @@ Then run the app in production mode:
 npm start
 ```
 
-Now you'll need to pick a host to deploy it to.
-
-### DIY
-
-If you're familiar with deploying Node applications, the built-in Remix app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
+Make sure to deploy the output of `npm run build`:
 
 - `build/server`
 - `build/client`
@@ -38,3 +41,9 @@ Make sure to deploy the output of `npm run build`
 ## Styling
 
 This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever css framework you prefer. See the [Vite docs on css](https://vitejs.dev/guide/features.html#css) for more information.
+
+## Troubleshooting
+
+- If the dev server fails to start, ensure Node.js >= 20 is installed.
+- Port 3000 is required (`strictPort: true`). Stop other services using 3000 or update `vite.config.ts`.
+- No `.env` is required locally. If you provide one, ensure `VITE_*` variables are valid URLs.
